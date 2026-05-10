@@ -5,6 +5,7 @@ import requests
 import streamlit as st
 
 COMPANIES_HOUSE_API_KEY = "be340484-da4d-4717-b064-faa44c3fffee"
+api_key = "be340484-da4d-4717-b064-faa44c3fffee"
 BASE_URL = "https://api.company-information.service.gov.uk"
 DEFAULT_PAGE_SIZE = 20
 MAX_OFFICERS = 35
