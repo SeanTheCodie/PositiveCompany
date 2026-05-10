@@ -225,18 +225,6 @@ def _apply_branding() -> None:
             """,
             unsafe_allow_html=True,
         )
-    st.markdown(
-        """
-        <div class="brand-banner">
-            <div class="brand-logo">PAW</div>
-            <div>
-                <div class="brand-title">Positive at Work</div>
-                <div>Company Intelligence Dashboard</div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
 def main() -> None:
