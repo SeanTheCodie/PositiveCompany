@@ -1,133 +1,261 @@
+import os
+from typing import Any, Dict, List
+
 import requests
-import json
-from pprint import pprint
+import streamlit as st
 
-API_KEY = "be340484-da4d-4717-b064-faa44c3fffee"
 BASE_URL = "https://api.company-information.service.gov.uk"
+DEFAULT_PAGE_SIZE = 20
+MAX_OFFICERS = 35
+MAX_FILINGS = 20
+MAX_PSC = 20
 
-def get(endpoint):
-    """Helper function to call Companies House API."""
+
+@st.cache_data(show_spinner=False)
+def companies_house_get(endpoint: str, api_key: str, params: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    """Call Companies House API and return JSON response."""
     url = f"{BASE_URL}{endpoint}"
-    response = requests.get(url, auth=(API_KEY, ""))
+    response = requests.get(url, params=params, auth=(api_key, ""), timeout=25)
+
+    if response.status_code == 404:
+        return {"items": []}
+
     if response.status_code != 200:
-        print(f"Error {response.status_code}: {response.text}")
-        return None
+        raise RuntimeError(f"API error {response.status_code}: {response.text}")
+
     return response.json()
 
 
-def print_section(title, data):
-    """Pretty-print a section of data."""
-    print("\n" + "=" * 80)
-    print(title.upper())
-    print("=" * 80)
-    pprint(data, sort_dicts=False)
+def search_companies(search_type: str, query: str, api_key: str) -> List[Dict[str, Any]]:
+    """Search companies by chosen method and return candidate company records."""
+    query = query.strip()
+    if not query:
+        return []
+
+    if search_type == "Company name":
+        data = companies_house_get(
+            "/search/companies",
+            api_key,
+            {"q": query, "items_per_page": DEFAULT_PAGE_SIZE},
+        )
+        return data.get("items", [])
+
+    if search_type == "Company number":
+        data = companies_house_get("/company/" + query.upper(), api_key)
+        if data and data.get("company_number"):
+            return [
+                {
+                    "company_name": data.get("company_name"),
+                    "company_number": data.get("company_number"),
+                    "address_snippet": _format_address(data.get("registered_office_address", {})),
+                }
+            ]
+        return []
+
+    if search_type == "Post code":
+        data = companies_house_get(
+            "/advanced-search/companies",
+            api_key,
+            {
+                "location": query,
+                "size": DEFAULT_PAGE_SIZE,
+            },
+        )
+        return data.get("items", [])
+
+    if search_type == "Director name":
+        data = companies_house_get(
+            "/search/officers",
+            api_key,
+            {"q": query, "items_per_page": DEFAULT_PAGE_SIZE},
+        )
+        officer_items = data.get("items", [])
+        companies: Dict[str, Dict[str, Any]] = {}
+
+        for officer in officer_items:
+            for appointment in officer.get("items", []):
+                appointed_to = appointment.get("appointed_to", {})
+                company_number = appointed_to.get("company_number")
+                if not company_number:
+                    continue
+                companies[company_number] = {
+                    "company_name": appointed_to.get("company_name", "Unknown"),
+                    "company_number": company_number,
+                    "address_snippet": "",
+                }
+
+        return list(companies.values())
+
+    return []
 
 
-def search_by_postcode_prefix(prefix):
-    """
-    Use the Companies House ADVANCED SEARCH endpoint to return ALL companies
-    whose registered office location includes with the given value.
-    Then allow the user to select one for a full lookup.
-    """
-    print(f"\nSearching for companies with adress matching : {prefix}")
+def _format_address(address: Dict[str, Any]) -> str:
+    if not address:
+        return ""
 
-    # Advanced search endpoint
-    endpoint = (
-        "/advanced-search/companies"
-        f"?location={prefix}"
-        "&size=5000"   # maximum allowed by API
+    parts = [
+        address.get("address_line_1"),
+        address.get("address_line_2"),
+        address.get("locality"),
+        address.get("region"),
+        address.get("postal_code"),
+        address.get("country"),
+    ]
+    return ", ".join([p for p in parts if p])
+
+
+def _company_option_label(item: Dict[str, Any]) -> str:
+    name = item.get("company_name", "Unknown company")
+    number = item.get("company_number", "N/A")
+    address = item.get("address_snippet") or _format_address(item.get("registered_office_address", {}))
+    return f"{name} ({number}) — {address}" if address else f"{name} ({number})"
+
+
+def company_details(company_number: str, api_key: str) -> Dict[str, Any]:
+    """Fetch full details for selected company."""
+    profile = companies_house_get(f"/company/{company_number}", api_key)
+    officers = companies_house_get(
+        f"/company/{company_number}/officers",
+        api_key,
+        {"items_per_page": MAX_OFFICERS},
+    )
+    filings = companies_house_get(
+        f"/company/{company_number}/filing-history",
+        api_key,
+        {"items_per_page": MAX_FILINGS},
+    )
+    psc = companies_house_get(
+        f"/company/{company_number}/persons-with-significant-control",
+        api_key,
+        {"items_per_page": MAX_PSC},
     )
 
-    results = get(endpoint)
+    return {
+        "profile": profile,
+        "officers": officers.get("items", []),
+        "filings": filings.get("items", []),
+        "psc": psc.get("items", []),
+    }
 
-    if not results or "items" not in results:
-        print("No results found.")
-        return
 
-    companies = results["items"]
+def main() -> None:
+    st.set_page_config(page_title="Companies House Explorer", page_icon="🏢", layout="wide")
 
-    if not companies:
-        print("\nNo companies matched the postcode prefix.")
-        return
+    st.title("🏢 Companies House Explorer")
+    st.caption("Search UK company data by company name, post code, company number, or director name.")
 
-    print("\n" + "=" * 80)
-    print(f"COMPANIES WITH POSTCODE PREFIX '{prefix}'")
-    print("=" * 80)
+    api_key = st.secrets.get("COMPANIES_HOUSE_API_KEY") or os.getenv("COMPANIES_HOUSE_API_KEY", "")
 
-    for i, c in enumerate(companies, start=1):
-        print(f"{i}. {c['company_name']} — {c['company_number']} ({c['registered_office_address'].get('postal_code', '')})")
+    if not api_key:
+        st.error(
+            "Missing API key. Add COMPANIES_HOUSE_API_KEY to Streamlit secrets or environment variables."
+        )
+        st.stop()
 
-    print("\nEnter the number of the company you want to look up:")
-    choice = input("> ")
+    search_type = st.selectbox(
+        "Search by",
+        ["Company name", "Post code", "Company number", "Director name"],
+    )
+    query = st.text_input("Enter search value")
 
-    try:
-        choice = int(choice)
-        if choice < 1 or choice > len(companies):
-            print("Invalid selection.")
-            return
-    except ValueError:
-        print("Please enter a valid number.")
-        return
+    if st.button("Search", type="primary"):
+        with st.spinner("Searching Companies House..."):
+            try:
+                st.session_state["search_results"] = search_companies(search_type, query, api_key)
+            except Exception as exc:
+                st.error(str(exc))
+                st.session_state["search_results"] = []
 
-    selected = companies[choice - 1]
-    print(f"\n✅ You selected: {selected['company_name']} ({selected['company_number']})")
+    results = st.session_state.get("search_results", [])
 
-    lookup_company(selected["company_number"])
-    
-def lookup_company(company_number):
-    print(f"\nFetching Companies House data for: {company_number}")
+    if results:
+        st.success(f"Found {len(results)} possible match(es).")
+        selected_company = st.selectbox(
+            "Choose a company",
+            options=results,
+            format_func=_company_option_label,
+        )
 
-    # 1. Company Profile
-    profile = get(f"/company/{company_number}")
-    print_section("Company Profile", profile)
+        if selected_company and st.button("Show details"):
+            number = selected_company.get("company_number")
+            if number:
+                with st.spinner("Loading full company details..."):
+                    try:
+                        details = company_details(number, api_key)
+                    except Exception as exc:
+                        st.error(str(exc))
+                        return
 
-    if not profile:
-        return
+                profile = details["profile"]
+                st.subheader(profile.get("company_name", "Company"))
 
-    # 2. Officers
-    officers = get(f"/company/{company_number}/officers")
-    print_section("Officers", officers)
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Company Number", profile.get("company_number", "N/A"))
+                col2.metric("Status", profile.get("company_status", "N/A").replace("-", " ").title())
+                col3.metric("Type", profile.get("type", "N/A").replace("-", " ").title())
 
-    # 3. Filing History
-    filing_history = get(f"/company/{company_number}/filing-history")
-    print_section("Filing History", filing_history)
+                st.markdown("### Key Information")
+                st.write({
+                    "Incorporation date": profile.get("date_of_creation"),
+                    "Registered office": _format_address(profile.get("registered_office_address", {})),
+                    "SIC codes": ", ".join(profile.get("sic_codes", [])),
+                    "Jurisdiction": profile.get("jurisdiction"),
+                    "Can file": profile.get("can_file"),
+                })
 
-    # 4. Persons with Significant Control (PSC)
-    psc = get(f"/company/{company_number}/persons-with-significant-control")
-    print_section("Persons With Significant Control", psc)
+                st.markdown("### Officers")
+                if details["officers"]:
+                    st.dataframe(
+                        [
+                            {
+                                "Name": o.get("name"),
+                                "Role": o.get("officer_role"),
+                                "Appointed": o.get("appointed_on"),
+                                "Country": o.get("country_of_residence"),
+                            }
+                            for o in details["officers"]
+                        ],
+                        use_container_width=True,
+                    )
+                else:
+                    st.info("No officers returned.")
 
-    # 5. Charges
-    charges = get(f"/company/{company_number}/charges")
-    print_section("Charges", charges)
+                st.markdown("### Persons with Significant Control")
+                if details["psc"]:
+                    st.dataframe(
+                        [
+                            {
+                                "Name": p.get("name"),
+                                "Kind": p.get("kind"),
+                                "Notified": p.get("notified_on"),
+                                "Nature of control": ", ".join(p.get("natures_of_control", [])),
+                            }
+                            for p in details["psc"]
+                        ],
+                        use_container_width=True,
+                    )
+                else:
+                    st.info("No PSC records returned.")
 
-    # 6. Registers
-    registers = get(f"/company/{company_number}/registers")
-    print_section("Registers", registers)
+                st.markdown("### Recent Filing History")
+                if details["filings"]:
+                    st.dataframe(
+                        [
+                            {
+                                "Date": f.get("date"),
+                                "Type": f.get("type"),
+                                "Description": f.get("description"),
+                            }
+                            for f in details["filings"]
+                        ],
+                        use_container_width=True,
+                    )
+                else:
+                    st.info("No filing history returned.")
 
-    # 7. Insolvency
-    insolvency = get(f"/company/{company_number}/insolvency")
-    print_section("Insolvency", insolvency)
-
-    print("\n✅ Done.\n")
+    elif "search_results" in st.session_state:
+        st.warning("No companies found for this search.")
 
 
 if __name__ == "__main__":
-    
-    while True:
-
-        mainmenu = ["Search by Company Number", "Search by Post Code"]
-
-        print("Company Finder\n")
-        for i, option in enumerate(mainmenu, start=1):
-            print(f"{i}. {option}")
-        choice = input("\nChose your action : ")
-        
-        match choice:
-            case "1":
-                search_company_number = input("Enter Company Number : ")
-                lookup_company(search_company_number)
-            case "2":
-                search_postcode = input("Enter part of address : ")
-                search_by_postcode_prefix(search_postcode)
-            case _:
-                break
+    main()
