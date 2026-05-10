@@ -1,11 +1,9 @@
-import os
 from typing import Any, Dict, List
 
 import requests
 import streamlit as st
 
 COMPANIES_HOUSE_API_KEY = "be340484-da4d-4717-b064-faa44c3fffee"
-api_key = "be340484-da4d-4717-b064-faa44c3fffee"
 BASE_URL = "https://api.company-information.service.gov.uk"
 DEFAULT_PAGE_SIZE = 20
 MAX_OFFICERS = 35
@@ -146,13 +144,7 @@ def main() -> None:
     st.title("🏢 Companies House Explorer")
     st.caption("Search UK company data by company name, post code, company number, or director name.")
 
-    api_key = st.secrets.get("COMPANIES_HOUSE_API_KEY") or os.getenv("COMPANIES_HOUSE_API_KEY", "")
-
-    if not api_key:
-        st.error(
-            "Missing API key. Add COMPANIES_HOUSE_API_KEY to Streamlit secrets or environment variables."
-        )
-        st.stop()
+    api_key = COMPANIES_HOUSE_API_KEY
 
     search_type = st.selectbox(
         "Search by",
