@@ -2,6 +2,7 @@ from typing import Any, Dict, List
 
 import requests
 import streamlit as st
+from pathlib import Path
 
 COMPANIES_HOUSE_API_KEY = "be340484-da4d-4717-b064-faa44c3fffee"
 BASE_URL = "https://api.company-information.service.gov.uk"
@@ -13,6 +14,7 @@ MAX_PSC = 20
 PRIMARY_COLOR = "#1B4D3E"  # Positive at Work green
 SECONDARY_COLOR = "#F4B400"  # Positive accent
 BACKGROUND_COLOR = "#F3FAF6"
+LOGO_PATH = Path(__file__).with_name("PAWLogo.png")
 
 
 @st.cache_data(show_spinner=False)
@@ -204,6 +206,25 @@ def _apply_branding() -> None:
         unsafe_allow_html=True,
     )
 
+    col_logo, col_text = st.columns([1, 8])
+    with col_logo:
+        if LOGO_PATH.exists():
+            st.image(str(LOGO_PATH), width=56)
+        else:
+            st.markdown('<div class="brand-logo">PAW</div>', unsafe_allow_html=True)
+
+    with col_text:
+        st.markdown(
+            """
+            <div class="brand-banner">
+                <div>
+                    <div class="brand-title">Positive at Work</div>
+                    <div>Company Intelligence Dashboard</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
     st.markdown(
         """
         <div class="brand-banner">
