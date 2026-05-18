@@ -111,9 +111,13 @@ def _format_address(address: Dict[str, Any]) -> str:
 
 
 def _company_option_label(item: Dict[str, Any]) -> str:
-    name = item.get("company_name", "Unknown company")
-    number = item.get("company_number", "N/A")
-    address = item.get("address_snippet") or _format_address(item.get("registered_office_address", {}))
+    name = item.get("company_name") or item.get("title") or item.get("name") or "Unknown company"
+    number = item.get("company_number") or item.get("company_num") or "N/A"
+    address = (
+        item.get("address_snippet")
+        or _format_address(item.get("registered_office_address", {}))
+        or _format_address(item.get("address", {}))
+    )
     return f"{name} ({number}) — {address}" if address else f"{name} ({number})"
 
 
